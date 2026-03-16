@@ -21,6 +21,15 @@ const WinBar = ({ prob, homeAbbr, awayAbbr }) => (
   </div>
 )
 
+const TeamLogo = ({ team }) => (
+  <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+    {team.logo
+      ? <img src={team.logo} alt={team.abbr} style={{ width: 36, height: 36, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
+      : <span style={{ fontSize: 22 }}>{team.emoji}</span>
+    }
+  </div>
+)
+
 export default function MatchCard({ home, away }) {
   const [homeInj,   setHomeInj]   = useState([])
   const [awayInj,   setAwayInj]   = useState([])
@@ -53,9 +62,12 @@ export default function MatchCard({ home, away }) {
 
   return (
     <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 20, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+
+      {/* Teams */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px 12px' }}>
+        {/* Home */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{home.emoji}</div>
+          <TeamLogo team={home} />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 18, fontWeight: 900, color: '#111' }}>{home.abbr}</span>
@@ -65,12 +77,16 @@ export default function MatchCard({ home, away }) {
             <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>L10: {home.last10} · {home.conf}</div>
           </div>
         </div>
+
+        {/* VS */}
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 14, fontWeight: 900, color: '#374151', letterSpacing: 1 }}>VS</div>
           <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>March Madness</div>
         </div>
+
+        {/* Away */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexDirection: 'row-reverse' }}>
-          <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{away.emoji}</div>
+          <TeamLogo team={away} />
           <div style={{ textAlign: 'right' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
               {awayInj.length > 0 && <span style={{ fontSize: 10, background: '#fee2e2', color: '#ef4444', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>🚑{awayInj.length}</span>}
@@ -82,6 +98,7 @@ export default function MatchCard({ home, away }) {
         </div>
       </div>
 
+      {/* Stats + Projection */}
       <div style={{ display: 'flex', alignItems: 'center', background: '#f9fafb', margin: '0 14px', borderRadius: 12, padding: '14px 18px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 9, letterSpacing: 2, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 6 }}>MOY {home.abbr}</div>
@@ -104,8 +121,10 @@ export default function MatchCard({ home, away }) {
         </div>
       </div>
 
+      {/* Win Prob */}
       <WinBar prob={pred.winProb} homeAbbr={home.abbr} awayAbbr={away.abbr} />
 
+      {/* Score Prévu */}
       <div style={{ margin: '10px 14px 0', background: '#f9fafb', borderRadius: 12, padding: '14px 18px' }}>
         <div style={{ fontSize: 9, letterSpacing: 2, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 10 }}>SCORE PRÉVU</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -126,6 +145,7 @@ export default function MatchCard({ home, away }) {
         </div>
       </div>
 
+      {/* Total + Badges */}
       <div style={{ padding: '12px 18px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>TOTAL: {pred.hScore + pred.aScore}</span>
@@ -138,6 +158,7 @@ export default function MatchCard({ home, away }) {
         </div>
       </div>
 
+      {/* Toggles */}
       <div style={{ padding: '0 14px 10px', display: 'flex', gap: 8 }}>
         <button onClick={() => setShowStats(s => !s)} style={{ flex: 1, padding: '9px 0', background: showStats ? '#f3f4f6' : '#fff', border: '1px solid #e5e7eb', borderRadius: 8, color: '#374151', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
           {showStats ? '▲ Masquer stats' : '▼ Stats avancées'}
@@ -157,6 +178,7 @@ export default function MatchCard({ home, away }) {
         </div>
       )}
 
+      {/* AI */}
       <div style={{ padding: '4px 14px 14px' }}>
         <button onClick={handleAnalyze} disabled={loading} style={{ width: '100%', padding: '11px 0', background: loading ? '#e5e7eb' : 'linear-gradient(135deg,#7c3aed,#6366f1)', border: 'none', borderRadius: 10, color: loading ? '#9ca3af' : '#fff', fontSize: 12, fontWeight: 800, cursor: loading ? 'wait' : 'pointer', letterSpacing: 1, textTransform: 'uppercase' }}>
           {loading ? '⏳  Analyse en cours...' : '✦  ANALYSE IA AVANCÉE'}
