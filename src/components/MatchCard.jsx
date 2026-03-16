@@ -25,12 +25,12 @@ const TeamLogo = ({ team }) => (
   <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
     {team.logo
       ? <img src={team.logo} alt={team.abbr} style={{ width: 36, height: 36, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
-      : <span style={{ fontSize: 22 }}>{team.emoji}</span>
+      : <span style={{ fontSize: 22 }}>{team.emoji || '🏀'}</span>
     }
   </div>
 )
 
-export default function MatchCard({ home, away }) {
+export default function MatchCard({ home, away, vegasSpread, vegasTotal }) {
   const [homeInj,   setHomeInj]   = useState([])
   const [awayInj,   setAwayInj]   = useState([])
   const [showInj,   setShowInj]   = useState(false)
@@ -39,20 +39,35 @@ export default function MatchCard({ home, away }) {
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState(null)
 
-  const pred     = predictAdvanced(home, away, homeInj, awayInj)
+  const pred   = predictAdvanced(home, away, homeInj, awayInj)
   const { hAdj, aAdj } = pred
-  const hWins    = pred.hScore >= pred.aScore
-  const winner   = hWins ? home : away
-  const spread   = Math.abs(pred.spread).toFixed(1)
-  const isOver   = (pred.hScore + pred.aScore) > pred.projTotal
-  const totalInj = homeInj.length + awayInj.length
-  const hNet     = hAdj.oRtg - hAdj.dRtg
-  const aNet     = aAdj.oRtg - aAdj.dRtg
+  const hWins  = pred.hScore >= pred.aScore
+  const winner = hWins ? home : away
+  const hNet   = hAdj.oRtg - hAdj.dRtg
+  const aNet   = aAdj.oRtg - aAdj.dRtg
+
+  // Vegas lines
+  const hasVegas     = vegasSpread !== undefined && vegasTotal !== undefined
+  const vegasFav     = vegasSpread <= 0 ? home : away
+  const vegasDog     = vegasSpread <= 0 ? away : home
+  const vegasAbsSprd = Math.abs(vegasSpread || 0).toFixed(1)
+
+  // Comparaison modèle vs Vegas
+  const modelSpread  = pred.spread
+  const spreadDiff   = hasVegas ? (modelSpread - vegasSpread).toFixed(1) : null
+  const totalDiff    = hasVegas ? (pred.actualTotal - vegasTotal).toFixed(1) : null
+
+  // Edge: si notre modèle diverge de Vegas de plus de 3 pts = value bet
+  const spreadEdge   = hasVegas && Math.abs(modelSpread - vegasSpread) >= 3
+  const totalEdge    = hasVegas && Math.abs(pred.actualTotal - vegasTotal) >= 5
+
+  // Over/Under vs Vegas
+  const isOverVegas  = hasVegas ? pred.actualTotal > vegasTotal : pred.isOver
 
   const handleAnalyze = async () => {
     setLoading(true); setAiText(null); setError(null)
     try {
-      const text = await analyzeMatchup(home, away, pred, homeInj, awayInj)
+      const text = await analyzeMatchup(home, away, pred, homeInj, awayInj, vegasSpread, vegasTotal)
       setAiText(text)
     } catch {
       setError('Erreur API. Vérifie VITE_ANTHROPIC_API_KEY dans Vercel.')
@@ -60,12 +75,13 @@ export default function MatchCard({ home, away }) {
     setLoading(false)
   }
 
+  const totalInj = homeInj.length + awayInj.length
+
   return (
     <div style={{ background: '#fff', borderRadius: 16, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 20, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
 
       {/* Teams */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px 12px' }}>
-        {/* Home */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <TeamLogo team={home} />
           <div>
@@ -74,17 +90,13 @@ export default function MatchCard({ home, away }) {
               <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#f3f4f6', color: '#6b7280' }}>#{home.seed}</span>
               {homeInj.length > 0 && <span style={{ fontSize: 10, background: '#fee2e2', color: '#ef4444', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>🚑{homeInj.length}</span>}
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>L10: {home.last10} · {home.conf}</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>L10: {home.last10W}-{home.last10L} · {home.conf}</div>
           </div>
         </div>
-
-        {/* VS */}
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 14, fontWeight: 900, color: '#374151', letterSpacing: 1 }}>VS</div>
-          <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>March Madness</div>
+          <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>NCAA 2026</div>
         </div>
-
-        {/* Away */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexDirection: 'row-reverse' }}>
           <TeamLogo team={away} />
           <div style={{ textAlign: 'right' }}>
@@ -93,24 +105,71 @@ export default function MatchCard({ home, away }) {
               <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#f3f4f6', color: '#6b7280' }}>#{away.seed}</span>
               <span style={{ fontSize: 18, fontWeight: 900, color: '#111' }}>{away.abbr}</span>
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>L10: {away.last10} · {away.conf}</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>L10: {away.last10W}-{away.last10L} · {away.conf}</div>
           </div>
         </div>
       </div>
 
+      {/* Vegas Lines */}
+      {hasVegas && (
+        <div style={{ margin: '0 14px', background: '#1e1b4b', borderRadius: 10, padding: '10px 14px' }}>
+          <div style={{ fontSize: 9, letterSpacing: 2, color: '#a5b4fc', textTransform: 'uppercase', marginBottom: 8, fontWeight: 700 }}>🎰 LIGNES VEGAS (DraftKings)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 9, color: '#a5b4fc', marginBottom: 3 }}>FAVORI</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>{vegasFav.abbr}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24' }}>{vegasSpread > 0 ? '+' : ''}{vegasSpread}</div>
+            </div>
+            <div style={{ textAlign: 'center', borderLeft: '1px solid #312e81', borderRight: '1px solid #312e81' }}>
+              <div style={{ fontSize: 9, color: '#a5b4fc', marginBottom: 3 }}>TOTAL O/U</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>{vegasTotal}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: isOverVegas ? '#10b981' : '#f59e0b' }}>
+                {isOverVegas ? 'OVER' : 'UNDER'} PRÉVU
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 9, color: '#a5b4fc', marginBottom: 3 }}>OUTSIDER</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>{vegasDog.abbr}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24' }}>+{vegasAbsSprd}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edge Alert */}
+      {(spreadEdge || totalEdge) && (
+        <div style={{ margin: '8px 14px 0', background: '#fef3c7', borderRadius: 8, padding: '8px 12px', borderLeft: '3px solid #f59e0b' }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: '#92400e', marginBottom: 4 }}>⚡ VALUE BET DÉTECTÉ</div>
+          {spreadEdge && (
+            <div style={{ fontSize: 11, color: '#92400e' }}>
+              Modèle: {home.abbr} {modelSpread > 0 ? '-' : '+'}{Math.abs(modelSpread).toFixed(1)} vs Vegas {vegasSpread > 0 ? '' : '+'}{vegasSpread} → Écart {spreadDiff > 0 ? '+' : ''}{spreadDiff} pts
+            </div>
+          )}
+          {totalEdge && (
+            <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
+              Total modèle: {pred.actualTotal} vs Vegas: {vegasTotal} → {isOverVegas ? 'OVER' : 'UNDER'} par {Math.abs(totalDiff)} pts
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Stats + Projection */}
-      <div style={{ display: 'flex', alignItems: 'center', background: '#f9fafb', margin: '0 14px', borderRadius: 12, padding: '14px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', background: '#f9fafb', margin: '10px 14px 0', borderRadius: 12, padding: '14px 18px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 9, letterSpacing: 2, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 6 }}>MOY {home.abbr}</div>
           <div style={{ fontSize: 26, fontWeight: 900, color: '#111', lineHeight: 1 }}>{hAdj.oRtg.toFixed(1)}</div>
           <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>DRtg {hAdj.dRtg.toFixed(1)}</div>
           <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2, color: hNet >= 0 ? '#10b981' : '#ef4444' }}>NET {hNet >= 0 ? '+' : ''}{hNet.toFixed(1)}</div>
           <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>eFG% {hAdj.eFG.toFixed(1)}</div>
+          <div style={{ fontSize: 10, color: '#9ca3af' }}>4F {pred.hFF}</div>
         </div>
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 9, letterSpacing: 2, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 4 }}>PROJECTION</div>
           <div style={{ fontSize: 34, fontWeight: 900, color: '#7c3aed', lineHeight: 1 }}>{pred.projTotal}</div>
           <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>Pace {((hAdj.pace + aAdj.pace) / 2).toFixed(1)}</div>
+          <div style={{ fontSize: 10, color: pred.confidence.includes('ÉLEVÉE') ? '#10b981' : pred.confidence.includes('MOYENNE') ? '#f59e0b' : '#ef4444', marginTop: 2, fontWeight: 700 }}>
+            {pred.confidence}
+          </div>
         </div>
         <div style={{ flex: 1, textAlign: 'right' }}>
           <div style={{ fontSize: 9, letterSpacing: 2, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 6 }}>MOY {away.abbr}</div>
@@ -118,6 +177,7 @@ export default function MatchCard({ home, away }) {
           <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>DRtg {aAdj.dRtg.toFixed(1)}</div>
           <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2, color: aNet >= 0 ? '#10b981' : '#ef4444' }}>NET {aNet >= 0 ? '+' : ''}{aNet.toFixed(1)}</div>
           <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>eFG% {aAdj.eFG.toFixed(1)}</div>
+          <div style={{ fontSize: 10, color: '#9ca3af' }}>4F {pred.aFF}</div>
         </div>
       </div>
 
@@ -148,13 +208,31 @@ export default function MatchCard({ home, away }) {
       {/* Total + Badges */}
       <div style={{ padding: '12px 18px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>TOTAL: {pred.hScore + pred.aScore}</span>
-          <Badge label={isOver ? 'OVER PRÉVU' : 'UNDER PRÉVU'} color={isOver ? '#16a34a' : '#d97706'} bg={isOver ? '#dcfce7' : '#fef3c7'} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>TOTAL: {pred.actualTotal}</span>
+          <Badge
+            label={isOverVegas ? `OVER ${hasVegas ? vegasTotal : pred.projTotal}` : `UNDER ${hasVegas ? vegasTotal : pred.projTotal}`}
+            color={isOverVegas ? '#16a34a' : '#d97706'}
+            bg={isOverVegas ? '#dcfce7' : '#fef3c7'}
+          />
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Badge label={`${home.abbr} ${pred.spread >= 0 ? '-' : '+'}${spread}`} color='#16a34a' bg='#dcfce7' />
-          <Badge label={`${away.abbr} ${pred.spread >= 0 ? '+' : '-'}${spread}`} color='#ef4444' bg='#fee2e2' />
-          <Badge label={`${winner.abbr} -${spread} COUVRE`} color={hWins ? '#16a34a' : '#ef4444'} bg={hWins ? '#dcfce7' : '#fee2e2'} />
+          {hasVegas ? (
+            <>
+              <Badge label={`${vegasFav.abbr} ${vegasSpread}`} color='#16a34a' bg='#dcfce7' />
+              <Badge label={`${vegasDog.abbr} +${vegasAbsSprd}`} color='#ef4444' bg='#fee2e2' />
+              <Badge
+                label={`${winner.abbr} COUVRE`}
+                color={hWins ? '#16a34a' : '#ef4444'}
+                bg={hWins ? '#dcfce7' : '#fee2e2'}
+              />
+            </>
+          ) : (
+            <>
+              <Badge label={`${home.abbr} ${pred.spread >= 0 ? '-' : '+'}${Math.abs(pred.spread).toFixed(1)}`} color='#16a34a' bg='#dcfce7' />
+              <Badge label={`${away.abbr} ${pred.spread >= 0 ? '+' : '-'}${Math.abs(pred.spread).toFixed(1)}`} color='#ef4444' bg='#fee2e2' />
+              <Badge label={`${winner.abbr} COUVRE`} color={hWins ? '#16a34a' : '#ef4444'} bg={hWins ? '#dcfce7' : '#fee2e2'} />
+            </>
+          )}
         </div>
       </div>
 
