@@ -132,3 +132,18 @@ export const TEAMS = [
     ],
   },
 ]
+
+export const MATCHUPS = [
+  { id: 1,  region: 'East',    home: 'DUKE', away: 'UMBC',  time: 'Jeu 19 Mar' },
+  { id: 2,  region: 'East',    home: 'CONN', away: 'UNC',   time: 'Ven 20 Mar' },
+  { id: 3,  region: 'East',    home: 'UNC',  away: 'VCU',   time: 'Ven 20 Mar' },
+  { id: 4,  region: 'West',    home: 'ARIZ', away: 'LIU',   time: 'Ven 20 Mar' },
+  { id: 5,  region: 'West',    home: 'WIS',  away: 'ARK',   time: 'Jeu 19 Mar' },
+  { id: 6,  region: 'West',    home: 'GONZ', away: 'PUR',   time: 'Jeu 19 Mar' },
+  { id: 7,  region: 'South',   home: 'FLA',  away: 'ISU',   time: 'Ven 20 Mar' },
+  { id: 8,  region: 'South',   home: 'ALA',  away: 'TENN',  time: 'Ven 20 Mar' },
+  { id: 9,  region: 'Midwest', home: 'MICH', away: 'TTU',   time: 'Jeu 19 Mar' },
+  { id: 10, region: 'Midwest', home: 'KU',   away: 'HOU',   time: 'Ven 20 Mar' },
+]
+  
+
