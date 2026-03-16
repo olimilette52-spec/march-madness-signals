@@ -145,5 +145,6 @@ export const MATCHUPS = [
   { id: 9,  region: 'Midwest', home: 'MICH', away: 'TTU',   time: 'Jeu 19 Mar' },
   { id: 10, region: 'Midwest', home: 'KU',   away: 'HOU',   time: 'Ven 20 Mar' },
 ]
-  
+  export const TEAMS_LIST = Object.values(TEAMS)
+
 
