@@ -1,3 +1,17 @@
+import { TEAMS_EAST } from './teamsEast'
+import { TEAMS_WEST } from './teamsWest'
+import { TEAMS_SOUTH } from './teamsSouth'
+import { TEAMS_MIDWEST } from './teamsMidwest'
+
+export const TEAMS = {
+  ...TEAMS_EAST,
+  ...TEAMS_WEST,
+  ...TEAMS_SOUTH,
+  ...TEAMS_MIDWEST,
+}
+
+export const TEAMS_LIST = Object.values(TEAMS)
+
 export const MATCHUPS = [
   // EAST
   { id: 1,  region: 'East',    home: 'DUKE',  away: 'SIENA', time: 'Jeu 19 Mar 19:10' },
@@ -36,5 +50,3 @@ export const MATCHUPS = [
   { id: 31, region: 'Midwest', home: 'KEN',   away: 'SCLA',  time: 'Ven 20 Mar 12:15' },
   { id: 32, region: 'Midwest', home: 'ISU',   away: 'TNST',  time: 'Ven 20 Mar 14:50' },
 ]
-
-export const TEAMS_LIST = Object.values(TEAMS)
