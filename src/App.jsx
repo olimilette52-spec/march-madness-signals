@@ -78,7 +78,12 @@ export default function App() {
               return (
                 <div key={m.id}>
                   <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, marginBottom: 6 }}>🕐 {m.time}</div>
-                  <MatchCard home={home} away={away} />
+                  <MatchCard
+                    home={home}
+                    away={away}
+                    vegasSpread={m.vegasSpread}
+                    vegasTotal={m.vegasTotal}
+                  />
                 </div>
               )
             })}
