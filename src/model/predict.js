@@ -1,6 +1,6 @@
 export function applyInjuries(team, injured = []) {
   if (injured.length === 0) return team
-  let { oRtg, dRtg, eFG, pace, tovPct, orbPct, ftRate } = team
+  let { oRtg, dRtg, eFG, pace, tovPct, orbPct, ftRate, adjOE, adjDE, adjT } = team
   const totalImpact = team.roster.reduce((s, p) => s + p.impact, 0)
   injured.forEach(name => {
     const p = team.roster.find(r => r.name === name)
@@ -8,13 +8,16 @@ export function applyInjuries(team, injured = []) {
     const w = p.impact / totalImpact
     oRtg   -= p.offImpact * 1.6
     dRtg   += p.defImpact * 1.6
+    adjOE  -= p.offImpact * 1.8
+    adjDE  += p.defImpact * 1.8
     eFG    -= p.offImpact * 0.7
     tovPct += w * 1.4
     orbPct -= w * 1.2
     ftRate -= w * 0.8
     pace   -= w * 1.0
+    adjT   -= w * 0.8
   })
-  return { ...team, oRtg, dRtg, eFG, pace, tovPct, orbPct, ftRate }
+  return { ...team, oRtg, dRtg, eFG, pace, tovPct, orbPct, ftRate, adjOE, adjDE, adjT }
 }
 
 function fourFactors(team) {
@@ -27,58 +30,82 @@ function fourFactors(team) {
   }
 }
 
-function spreadModel(fav, dog, absSpread) {
+// ── VRAIE FORMULE KENPOM POUR LE TOTAL ────────────────────────────────────
+// Points_A = (AdjOE_A × AdjDE_B / 100) × (AdjT / 100)
+// Points_B = (AdjOE_B × AdjDE_A / 100) × (AdjT / 100)
+// Total = Points_A + Points_B
+function projectTotal(h, a) {
+  const avgT = (h.adjT + a.adjT) / 2
+
+  // Score projeté via efficacités croisées KenPom
+  // Ajustement tournoi: site neutre = -2.5% sur le total
+  const hPoints = (h.adjOE * a.adjDE / 100) * (avgT / 100) * 0.975
+  const aPoints = (a.adjOE * h.adjDE / 100) * (avgT / 100) * 0.975
+
+  return {
+    hPoints: parseFloat(hPoints.toFixed(1)),
+    aPoints: parseFloat(aPoints.toFixed(1)),
+    total:   parseFloat((hPoints + aPoints).toFixed(1)),
+    spread:  parseFloat((hPoints - aPoints).toFixed(1))
+  }
+}
+
+// ── MODÈLE SPREAD ─────────────────────────────────────────────────────────
+function spreadModel(fav, dog, absSpread, projSpread) {
   let score = 0
+
+  // 1. AdjEM différentiel — stat reine KenPom
+  const adjEMdiff = (fav.adjEM || 20) - (dog.adjEM || 5)
+  score += adjEMdiff * 0.06
+
+  // 2. Spread projeté vs spread Vegas
+  // Si notre modèle dit que le favori gagne par plus que le spread → favori couvre
+  const projFavSpread = Math.abs(projSpread)
+  const spreadEdge = projFavSpread - absSpread
+  score += spreadEdge * 0.12
+
+  // 3. Efficacités croisées
+  // Offense favori vs défense underdog
+  const favOffVsDogDef = (fav.adjOE || 115) - (dog.adjDE || 100)
+  score += favOffVsDogDef * 0.04
+
+  // Offense underdog vs défense favori
+  const dogOffVsFavDef = (dog.adjOE || 105) - (fav.adjDE || 92)
+  score -= dogOffVsFavDef * 0.04  // si underdog peut scorer = moins de cover
+
+  // 4. Four Factors
   const favFF = fourFactors(fav)
   const dogFF = fourFactors(dog)
+  score += (favFF.efg - dogFF.efg) * 0.08
+  score += (dogFF.tov - favFF.tov) * 0.06
+  score += (favFF.orb - dogFF.orb) * 0.05
 
-  // 1. KenPom AdjEM différentiel
-  const favAdjEM = (fav.kpOff || 50) + (fav.kpDef || 50)
-  const dogAdjEM = (dog.kpOff || 150) + (dog.kpDef || 150)
-  score += (dogAdjEM - favAdjEM) * 0.04
-
-  // 2. KenPom rank différentiel
-  score += ((dog.kpRank || 150) - (fav.kpRank || 50)) * 0.025
-
-  // 3. Offense underdog vs defense favori
-  const dogOffVsFavDef = (fav.kpDef || 50) - (dog.kpOff || 150)
-  score += dogOffVsFavDef * 0.02
-
-  // 4. NET rating
-  const favNet = fav.oRtg - fav.dRtg
-  const dogNet = dog.oRtg - dog.dRtg
-  score += ((favNet - dogNet) * 2.2 - absSpread) * 0.15
-
-  // 5. Four Factors
-  score += (favFF.efg - dogFF.efg) * 0.10
-  score += (dogFF.tov - favFF.tov) * 0.08
-  score += (favFF.orb - dogFF.orb) * 0.06
-
-  // 6. Taille du spread — historique NCAA Tournament
+  // 5. Taille du spread — historique NCAA Tournament
   // spread 20+ = underdog couvre 56%, 15-19 = 53%, 10-14 = 51%
-  if (absSpread >= 20)      score -= 8.0
-  else if (absSpread >= 15) score -= 5.5
-  else if (absSpread >= 10) score -= 2.5
-  else if (absSpread >= 6)  score -= 0.8
-  else                      score += 1.2
+  if (absSpread >= 22)      score -= 7.0
+  else if (absSpread >= 18) score -= 5.0
+  else if (absSpread >= 14) score -= 3.0
+  else if (absSpread >= 10) score -= 1.5
+  else if (absSpread >= 6)  score -= 0.5
+  else                      score += 1.0
 
-  // 7. Momentum L10
-  score += ((fav.last10W || 5) - (dog.last10W || 5)) * 0.30
+  // 6. Momentum L10
+  score += ((fav.last10W || 5) - (dog.last10W || 5)) * 0.28
 
-  // 8. SOS
-  score -= ((fav.sos || 5) - (dog.sos || 5)) * 0.18
+  // 7. SOS — underdog de bonne conférence couvre plus souvent
+  score -= ((fav.sos || 5) - (dog.sos || 5)) * 0.15
 
-  // 9. Défense KenPom de l'underdog
-  if ((dog.kpDef || 100) < 20)      score -= 2.5
-  else if ((dog.kpDef || 100) < 35) score -= 1.5
-  else if ((dog.kpDef || 100) < 50) score -= 0.8
+  // 8. Défense underdog forte → couvre souvent
+  if ((dog.adjDE || 100) < 90)      score -= 2.0
+  else if ((dog.adjDE || 100) < 94) score -= 1.2
+  else if ((dog.adjDE || 100) < 97) score -= 0.6
 
-  // 10. Pace matchup
-  const paceDiff = fav.pace - dog.pace
+  // 9. Pace mismatch — underdog lent ralentit le jeu = couvre
+  const paceDiff = (fav.adjT || 70) - (dog.adjT || 70)
   if (paceDiff > 5)  score -= 0.8
   if (paceDiff < -5) score += 0.8
 
-  const favCoverProb = Math.min(76, Math.max(34, Math.round(50 + score * 2.2)))
+  const favCoverProb = Math.min(74, Math.max(36, Math.round(50 + score * 2.0)))
   const dogCoverProb = 100 - favCoverProb
 
   return {
@@ -87,69 +114,75 @@ function spreadModel(fav, dog, absSpread) {
     dogCoverProb,
     coverTeam:    favCoverProb > 50 ? fav : dog,
     coverProb:    Math.max(favCoverProb, dogCoverProb),
+    projSpread:   projSpread.toFixed(1),
     score:        score.toFixed(2)
   }
 }
 
-function overUnderModel(h, a, vegasTotal) {
+// ── MODÈLE OVER/UNDER ─────────────────────────────────────────────────────
+function overUnderModel(h, a, vegasTotal, projTotal) {
   let score = 0
 
-  // 1. KenPom offense ranks combinés
-  const avgOffRank = ((h.kpOff || 100) + (a.kpOff || 100)) / 2
-  if      (avgOffRank < 15)  score += 2.5
-  else if (avgOffRank < 30)  score += 1.5
-  else if (avgOffRank < 50)  score += 0.8
-  else if (avgOffRank > 100) score -= 1.0
-  else if (avgOffRank > 150) score -= 2.0
+  // 1. Total projeté vs total Vegas — signal principal
+  const totalEdge = projTotal - vegasTotal
+  score += totalEdge * 0.15
 
-  // 2. KenPom defense ranks combinés
-  const avgDefRank = ((h.kpDef || 100) + (a.kpDef || 100)) / 2
-  if      (avgDefRank < 10)  score -= 3.0
-  else if (avgDefRank < 20)  score -= 2.0
-  else if (avgDefRank < 35)  score -= 1.2
-  else if (avgDefRank < 55)  score -= 0.5
-  else if (avgDefRank > 80)  score += 0.8
-  else if (avgDefRank > 120) score += 1.5
+  // 2. AdjDE combiné — meilleures défenses = under
+  const avgAdjDE = ((h.adjDE || 95) + (a.adjDE || 95)) / 2
+  if      (avgAdjDE < 88)  score -= 3.5
+  else if (avgAdjDE < 91)  score -= 2.5
+  else if (avgAdjDE < 94)  score -= 1.5
+  else if (avgAdjDE < 97)  score -= 0.5
+  else if (avgAdjDE > 103) score += 0.8
+  else if (avgAdjDE > 106) score += 1.8
+  else if (avgAdjDE > 110) score += 2.8
 
-  // 3. Pace vs total Vegas
-  const avgPace = (h.pace + a.pace) / 2
-  score += ((avgPace - 68) * (145 / vegasTotal)) * 0.5
+  // 3. AdjOE combiné — meilleures offenses = over
+  const avgAdjOE = ((h.adjOE || 112) + (a.adjOE || 112)) / 2
+  if      (avgAdjOE > 122) score += 2.5
+  else if (avgAdjOE > 119) score += 1.5
+  else if (avgAdjOE > 116) score += 0.8
+  else if (avgAdjOE < 110) score -= 0.8
+  else if (avgAdjOE < 107) score -= 1.5
 
-  // 4. TOV%
+  // 4. Tempo combiné — pace élevé = over
+  const avgAdjT = ((h.adjT || 70) + (a.adjT || 70)) / 2
+  if      (avgAdjT > 75)   score += 2.0
+  else if (avgAdjT > 73)   score += 1.2
+  else if (avgAdjT > 71)   score += 0.5
+  else if (avgAdjT < 67)   score -= 1.5
+  else if (avgAdjT < 65)   score -= 2.5
+  else if (avgAdjT < 62)   score -= 3.5
+
+  // 5. TOV% combiné
   const avgTOV = (h.tovPct + a.tovPct) / 2
-  if      (avgTOV > 16) score -= 2.0
-  else if (avgTOV > 15) score -= 1.2
-  else if (avgTOV < 13) score += 1.2
-  else if (avgTOV < 12) score += 2.0
+  if      (avgTOV > 16) score -= 1.8
+  else if (avgTOV > 15) score -= 1.0
+  else if (avgTOV < 13) score += 1.0
+  else if (avgTOV < 12) score += 1.8
 
-  // 5. Total Vegas signal
-  if      (vegasTotal < 133) score -= 2.5
-  else if (vegasTotal < 138) score -= 1.2
-  else if (vegasTotal < 142) score -= 0.5
-  else if (vegasTotal > 168) score += 2.5
-  else if (vegasTotal > 162) score += 1.5
-  else if (vegasTotal > 156) score += 0.8
+  // 6. Total Vegas comme signal de direction
+  if      (vegasTotal < 133) score -= 2.0
+  else if (vegasTotal < 138) score -= 1.0
+  else if (vegasTotal > 165) score += 2.0
+  else if (vegasTotal > 160) score += 1.2
 
-  // 6. eFG%
+  // 7. eFG% combiné
   const avgEFG = (h.eFG + a.eFG) / 2
-  score += (avgEFG - 52) * 0.25
+  score += (avgEFG - 52) * 0.20
 
-  // 7. Momentum
-  const avgL10 = ((h.last10W || 5) + (a.last10W || 5)) / 2
-  if      (avgL10 > 7.5) score += 1.0
-  else if (avgL10 < 4.5) score -= 1.0
-
-  const overProb  = Math.min(74, Math.max(36, Math.round(50 + score * 2.8)))
+  const overProb  = Math.min(74, Math.max(36, Math.round(50 + score * 2.5)))
   const underProb = 100 - overProb
 
   return {
-    isOver:     overProb > 50,
+    isOver:    overProb > 50,
     overProb,
     underProb,
-    ouProb:     Math.max(overProb, underProb),
-    avgPace:    avgPace.toFixed(1),
-    avgDefRank: avgDefRank.toFixed(0),
-    score:      score.toFixed(2)
+    ouProb:    Math.max(overProb, underProb),
+    projTotal: projTotal.toFixed(1),
+    avgAdjDE:  avgAdjDE.toFixed(1),
+    avgAdjT:   avgAdjT.toFixed(1),
+    score:     score.toFixed(2)
   }
 }
 
@@ -160,27 +193,34 @@ export function predictAdvanced(home, away, homeInj = [], awayInj = [], vegasSpr
   const hFF = fourFactors(h)
   const aFF = fourFactors(a)
 
+  // Projection KenPom
+  const proj = projectTotal(h, a)
+
+  // Favori/underdog selon Vegas
   const fav = (vegasSpread !== undefined && vegasSpread !== null)
     ? (vegasSpread <= 0 ? h : a)
     : (h.seed <= a.seed ? h : a)
   const dog       = fav.abbr === h.abbr ? a : h
   const absSpread = Math.abs(vegasSpread || 3.5)
 
-  const spreadResult = spreadModel(fav, dog, absSpread)
-  const ouResult     = overUnderModel(h, a, vegasTotal || 145)
+  // Spread projeté du côté du favori
+  const projSpread = fav.abbr === h.abbr ? proj.spread : -proj.spread
 
-  const kpRankDiff = (a.kpRank || 100) - (h.kpRank || 100)
-  const netDiff    = (h.oRtg - h.dRtg) - (a.oRtg - a.dRtg)
-  const sosFactor  = ((h.sos || 5) - (a.sos || 5)) * 0.8
-  const l10Factor  = ((h.last10W || 5) - (a.last10W || 5)) * 0.6
-  const seedFactor = (a.seed - h.seed) * 1.0
-  const ffFactor   = (hFF.score - aFF.score) * 0.3
+  const spreadResult = spreadModel(fav, dog, absSpread, projSpread)
+  const ouResult     = overUnderModel(h, a, vegasTotal || 145, proj.total)
 
-  const rawProb = 50 + kpRankDiff * 0.18 + netDiff * 1.1 + sosFactor + l10Factor + seedFactor + ffFactor
+  // Probabilité victoire basée sur AdjEM
+  const adjEMdiff  = (h.adjEM || 20) - (a.adjEM || 5)
+  const sosFactor  = ((h.sos || 5) - (a.sos || 5)) * 0.6
+  const l10Factor  = ((h.last10W || 5) - (a.last10W || 5)) * 0.5
+  const seedFactor = (a.seed - h.seed) * 0.8
+  const ffFactor   = (hFF.score - aFF.score) * 0.25
+
+  const rawProb = 50 + adjEMdiff * 0.85 + sosFactor + l10Factor + seedFactor + ffFactor
   const winProb = Math.min(95, Math.max(5, Math.round(rawProb)))
 
-  const kpDiffAbs  = Math.abs(kpRankDiff)
-  const confidence = kpDiffAbs > 80 ? 'ÉLEVÉE 🟢' : kpDiffAbs > 40 ? 'MOYENNE 🟡' : 'FAIBLE 🔴'
+  const adjEMabs   = Math.abs(adjEMdiff)
+  const confidence = adjEMabs > 20 ? 'ÉLEVÉE 🟢' : adjEMabs > 10 ? 'MOYENNE 🟡' : 'FAIBLE 🔴'
 
   return {
     favCovers:    spreadResult.favCovers,
@@ -194,15 +234,18 @@ export function predictAdvanced(home, away, homeInj = [], awayInj = [], vegasSpr
     underProb: ouResult.underProb,
     ouProb:    ouResult.ouProb,
     ouDetails: ouResult,
+    projTotal: proj.total,
+    projSpread: proj.spread,
     winProb,
     confidence,
     hAdj: h, aAdj: a,
     hFF: hFF.score.toFixed(1),
     aFF: aFF.score.toFixed(1),
-    hScore: 0, aScore: 0,
-    projTotal:   vegasTotal || 145,
+    hScore: parseFloat(proj.hPoints.toFixed(0)),
+    aScore: parseFloat(proj.aPoints.toFixed(0)),
+    projTotal:   proj.total,
     spread:      vegasSpread || 0,
-    actualTotal: 0,
+    actualTotal: proj.total,
     absSpread:   absSpread.toFixed(1)
   }
 }
