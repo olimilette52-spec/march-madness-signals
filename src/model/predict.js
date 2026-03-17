@@ -27,61 +27,55 @@ function fourFactors(team) {
   }
 }
 
-// ── MODÈLE SPREAD ─────────────────────────────────────────────────────────
 function spreadModel(fav, dog, absSpread) {
   let score = 0
   const favFF = fourFactors(fav)
   const dogFF = fourFactors(dog)
 
-  // 1. KenPom AdjEM différentiel — le meilleur prédicteur
-  // AdjEM = kpOff rank - kpDef rank (plus bas = meilleur)
-  const favAdjEM = (fav.kpOff || 50) + (fav.kpDef || 50)  // score combiné (bas = bon)
+  // 1. KenPom AdjEM différentiel
+  const favAdjEM = (fav.kpOff || 50) + (fav.kpDef || 50)
   const dogAdjEM = (dog.kpOff || 150) + (dog.kpDef || 150)
-  const kpDiff   = dogAdjEM - favAdjEM  // positif = favori meilleur
-  score += kpDiff * 0.04
+  score += (dogAdjEM - favAdjEM) * 0.04
 
   // 2. KenPom rank différentiel
-  const kpRankDiff = (dog.kpRank || 150) - (fav.kpRank || 50)
-  score += kpRankDiff * 0.025
+  score += ((dog.kpRank || 150) - (fav.kpRank || 50)) * 0.025
 
-  // 3. Offense KenPom rank de l'underdog vs defense KenPom rank du favori
-  // Si underdog offense rank (bas = bon) < favori defense rank → underdog peut scorer
+  // 3. Offense underdog vs defense favori
   const dogOffVsFavDef = (fav.kpDef || 50) - (dog.kpOff || 150)
-  score += dogOffVsFavDef * 0.02  // positif = favori défense meilleure → favori couvre
+  score += dogOffVsFavDef * 0.02
 
-  // 4. NET rating différentiel
+  // 4. NET rating
   const favNet = fav.oRtg - fav.dRtg
   const dogNet = dog.oRtg - dog.dRtg
-  const netDiff = favNet - dogNet
-  const expectedMargin = netDiff * 2.2
-  score += (expectedMargin - absSpread) * 0.15
+  score += ((favNet - dogNet) * 2.2 - absSpread) * 0.15
 
   // 5. Four Factors
   score += (favFF.efg - dogFF.efg) * 0.10
   score += (dogFF.tov - favFF.tov) * 0.08
   score += (favFF.orb - dogFF.orb) * 0.06
 
-  // 6. Facteur taille du spread — historique NCAA Tournament
-  if (absSpread >= 20)      score -= 4.0
-  else if (absSpread >= 15) score -= 2.5
-  else if (absSpread >= 10) score -= 1.0
-  else if (absSpread >= 6)  score -= 0.3
-  else                      score += 1.5
+  // 6. Taille du spread — historique NCAA Tournament
+  // spread 20+ = underdog couvre 56%, 15-19 = 53%, 10-14 = 51%
+  if (absSpread >= 20)      score -= 8.0
+  else if (absSpread >= 15) score -= 5.5
+  else if (absSpread >= 10) score -= 2.5
+  else if (absSpread >= 6)  score -= 0.8
+  else                      score += 1.2
 
   // 7. Momentum L10
   score += ((fav.last10W || 5) - (dog.last10W || 5)) * 0.30
 
-  // 8. SOS — underdog de bonne conférence couvre plus souvent
+  // 8. SOS
   score -= ((fav.sos || 5) - (dog.sos || 5)) * 0.18
 
   // 9. Défense KenPom de l'underdog
-  if ((dog.kpDef || 100) < 20) score -= 2.5  // underdog top 20 défense
+  if ((dog.kpDef || 100) < 20)      score -= 2.5
   else if ((dog.kpDef || 100) < 35) score -= 1.5
   else if ((dog.kpDef || 100) < 50) score -= 0.8
 
   // 10. Pace matchup
   const paceDiff = fav.pace - dog.pace
-  if (paceDiff > 5)  score -= 0.8  // underdog joue lent = couvre
+  if (paceDiff > 5)  score -= 0.8
   if (paceDiff < -5) score += 0.8
 
   const favCoverProb = Math.min(76, Math.max(34, Math.round(50 + score * 2.2)))
@@ -97,34 +91,31 @@ function spreadModel(fav, dog, absSpread) {
   }
 }
 
-// ── MODÈLE OVER/UNDER ─────────────────────────────────────────────────────
 function overUnderModel(h, a, vegasTotal) {
   let score = 0
 
-  // 1. KenPom offense ranks combinés — meilleure offense = over
+  // 1. KenPom offense ranks combinés
   const avgOffRank = ((h.kpOff || 100) + (a.kpOff || 100)) / 2
-  // Rank bas = bonne offense → over
-  if (avgOffRank < 15)       score += 2.5
+  if      (avgOffRank < 15)  score += 2.5
   else if (avgOffRank < 30)  score += 1.5
   else if (avgOffRank < 50)  score += 0.8
   else if (avgOffRank > 100) score -= 1.0
   else if (avgOffRank > 150) score -= 2.0
 
-  // 2. KenPom defense ranks combinés — meilleure défense = under
+  // 2. KenPom defense ranks combinés
   const avgDefRank = ((h.kpDef || 100) + (a.kpDef || 100)) / 2
-  if (avgDefRank < 10)       score -= 3.0  // deux excellentes défenses = under fort
+  if      (avgDefRank < 10)  score -= 3.0
   else if (avgDefRank < 20)  score -= 2.0
   else if (avgDefRank < 35)  score -= 1.2
   else if (avgDefRank < 55)  score -= 0.5
   else if (avgDefRank > 80)  score += 0.8
   else if (avgDefRank > 120) score += 1.5
 
-  // 3. Pace combiné relatif au total Vegas
+  // 3. Pace vs total Vegas
   const avgPace = (h.pace + a.pace) / 2
-  const paceVsTotal = (avgPace - 68) * (145 / vegasTotal)
-  score += paceVsTotal * 0.5
+  score += ((avgPace - 68) * (145 / vegasTotal)) * 0.5
 
-  // 4. TOV% combiné
+  // 4. TOV%
   const avgTOV = (h.tovPct + a.tovPct) / 2
   if      (avgTOV > 16) score -= 2.0
   else if (avgTOV > 15) score -= 1.2
@@ -132,18 +123,18 @@ function overUnderModel(h, a, vegasTotal) {
   else if (avgTOV < 12) score += 2.0
 
   // 5. Total Vegas signal
-  if      (vegasTotal < 133) score -= 2.5  // Vegas dit match défensif
+  if      (vegasTotal < 133) score -= 2.5
   else if (vegasTotal < 138) score -= 1.2
   else if (vegasTotal < 142) score -= 0.5
-  else if (vegasTotal > 168) score += 2.5  // Vegas dit match offensif
+  else if (vegasTotal > 168) score += 2.5
   else if (vegasTotal > 162) score += 1.5
   else if (vegasTotal > 156) score += 0.8
 
-  // 6. eFG% combiné
+  // 6. eFG%
   const avgEFG = (h.eFG + a.eFG) / 2
   score += (avgEFG - 52) * 0.25
 
-  // 7. Momentum — deux équipes en forme = over
+  // 7. Momentum
   const avgL10 = ((h.last10W || 5) + (a.last10W || 5)) / 2
   if      (avgL10 > 7.5) score += 1.0
   else if (avgL10 < 4.5) score -= 1.0
@@ -152,13 +143,13 @@ function overUnderModel(h, a, vegasTotal) {
   const underProb = 100 - overProb
 
   return {
-    isOver:   overProb > 50,
+    isOver:     overProb > 50,
     overProb,
     underProb,
-    ouProb:   Math.max(overProb, underProb),
-    avgPace:  avgPace.toFixed(1),
+    ouProb:     Math.max(overProb, underProb),
+    avgPace:    avgPace.toFixed(1),
     avgDefRank: avgDefRank.toFixed(0),
-    score:    score.toFixed(2)
+    score:      score.toFixed(2)
   }
 }
 
@@ -178,7 +169,6 @@ export function predictAdvanced(home, away, homeInj = [], awayInj = [], vegasSpr
   const spreadResult = spreadModel(fav, dog, absSpread)
   const ouResult     = overUnderModel(h, a, vegasTotal || 145)
 
-  // Probabilité victoire basée sur KenPom rank
   const kpRankDiff = (a.kpRank || 100) - (h.kpRank || 100)
   const netDiff    = (h.oRtg - h.dRtg) - (a.oRtg - a.dRtg)
   const sosFactor  = ((h.sos || 5) - (a.sos || 5)) * 0.8
