@@ -77,45 +77,43 @@ function spreadModel(fav, dog, absSpread) {
 function overUnderModel(h, a, vegasTotal) {
   let score = 0
 
-  // 1. PACE vs total Vegas
+  // 1. Pace relatif au total Vegas
   const avgPace = (h.pace + a.pace) / 2
-  const paceVsTotal = (avgPace - 68) * (145 / vegasTotal)
-  score += paceVsTotal * 0.6
+  const paceEdge = avgPace - (vegasTotal / 2.1)
+  score += paceEdge * 0.3
 
-  // 2. eFG% combiné
-  const avgEFG = (h.eFG + a.eFG) / 2
-  score += (avgEFG - 51) * 0.5
-
-  // 3. TOV%
+  // 2. TOV — plus de turnovers = UNDER
   const avgTOV = (h.tovPct + a.tovPct) / 2
-  score -= (avgTOV - 14) * 0.4
+  if      (avgTOV > 16) score -= 2.5
+  else if (avgTOV > 15) score -= 1.5
+  else if (avgTOV > 14) score -= 0.5
+  else if (avgTOV < 13) score += 1.5
+  else if (avgTOV < 12) score += 2.5
 
-  // 4. TS%
-  const avgTS = (h.tsPct + a.tsPct) / 2
-  score += (avgTS - 55) * 0.3
+  // 3. DRtg combiné — bonnes défenses = UNDER
+  const avgDRtg = (h.dRtg + a.dRtg) / 2
+  if      (avgDRtg < 90) score -= 3.0
+  else if (avgDRtg < 93) score -= 2.0
+  else if (avgDRtg < 96) score -= 1.0
+  else if (avgDRtg > 103) score += 1.0
+  else if (avgDRtg > 106) score += 2.0
 
-  // 5. FT Rate
-  const avgFT = (h.ftRate + a.ftRate) / 2
-  score += (avgFT - 34) * 0.2
+  // 4. Total Vegas comme signal
+  if      (vegasTotal < 133) score -= 2.0
+  else if (vegasTotal < 138) score -= 1.0
+  else if (vegasTotal > 165) score += 2.0
+  else if (vegasTotal > 160) score += 1.0
 
-  // 6. ORB%
-  const avgORB = (h.orbPct + a.orbPct) / 2
-  score += (avgORB - 29) * 0.15
+  // 5. Momentum combiné
+  const avgL10 = ((h.last10W || 5) + (a.last10W || 5)) / 2
+  if      (avgL10 > 7) score += 1.0
+  else if (avgL10 < 4) score -= 1.0
 
-  // 7. NET rating combiné
-  const avgNet = ((h.oRtg - h.dRtg) + (a.oRtg - a.dRtg)) / 2
-  if      (avgNet > 15) score += 1.5
-  else if (avgNet > 10) score += 0.8
-  else if (avgNet <  5) score -= 0.8
-  else if (avgNet <  0) score -= 1.5
+  // 6. eFG diff
+  const efgDiff = h.eFG - a.eFG
+  score += efgDiff * 0.05
 
-  // 8. Total Vegas bas = over, haut = under
-  if      (vegasTotal < 135) score += 1.5
-  else if (vegasTotal < 140) score += 0.8
-  else if (vegasTotal > 165) score -= 1.5
-  else if (vegasTotal > 158) score -= 0.8
-
-  const overProb  = Math.min(74, Math.max(36, Math.round(50 + score * 2.2)))
+  const overProb  = Math.min(72, Math.max(38, Math.round(50 + score * 3.5)))
   const underProb = 100 - overProb
 
   return {
@@ -124,7 +122,7 @@ function overUnderModel(h, a, vegasTotal) {
     underProb,
     ouProb:   Math.max(overProb, underProb),
     avgPace:  avgPace.toFixed(1),
-    avgEFG:   avgEFG.toFixed(1),
+    avgDRtg:  avgDRtg.toFixed(1),
     score:    score.toFixed(2)
   }
 }
