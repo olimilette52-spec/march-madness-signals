@@ -21,119 +21,170 @@ function fourFactorsScore(team) {
   return team.eFG * 0.40 + (20 - team.tovPct) * 0.25 + team.orbPct * 0.20 + team.ftRate * 0.15
 }
 
-// Calibration basée sur historique NCAA Tournament
-// Score moyen NCAA Tournament = ~72 pts par équipe
-// Total moyen = ~144 pts
-// Pace moyen = ~70 possessions par équipe
-const LEAGUE_AVG_ORTG = 100  // baseline NCAA
-const LEAGUE_AVG_DRTG = 100
-const TOURNAMENT_FACTOR = 0.98  // légère réduction en tournoi (site neutre, meilleurs adversaires)
+// Modèle de couverture du spread
+// Basé sur les facteurs qui prédisent si un underdog couvre
+function spreadCoverModel(fav, dog, vegasSpread) {
+  const absSpread = Math.abs(vegasSpread)
 
-export function predictAdvanced(home, away, homeInj = [], awayInj = []) {
+  // Four Factors
+  const favFF = fourFactorsScore(fav)
+  const dogFF = fourFactorsScore(dog)
+
+  // NET rating différentiel
+  const favNet = fav.oRtg - fav.dRtg
+  const dogNet = dog.oRtg - dog.dRtg
+  const netDiff = favNet - dogNet
+
+  // Facteurs historiques NCAA Tournament
+  // 1. Gros spreads (>15) — underdogs couvrent ~52% du temps
+  // 2. Momentum L10 de l'underdog
+  // 3. Four Factors de l'underdog
+  // 4. SOS — underdog d'une meilleure conférence
+
+  let dogCoverScore = 0
+
+  // Facteur spread — plus le spread est grand, plus l'underdog a de valeur
+  if (absSpread >= 20) dogCoverScore += 3.0
+  else if (absSpread >= 15) dogCoverScore += 2.0
+  else if (absSpread >= 10) dogCoverScore += 1.0
+  else if (absSpread >= 7)  dogCoverScore += 0.5
+  else dogCoverScore -= 1.0  // petits spreads favorisent le favori
+
+  // Momentum underdog
+  const dogMomentum = (dog.last10W || 5) - 5
+  dogCoverScore += dogMomentum * 0.4
+
+  // Four Factors underdog vs favori
+  const ffDiff = dogFF - favFF
+  dogCoverScore += ffDiff * 0.15
+
+  // SOS underdog
+  const sosDiff = (dog.sos || 5) - (fav.sos || 5)
+  dogCoverScore += sosDiff * 0.3
+
+  // NET rating — si le NET est moins mauvais que le spread suggère
+  const expectedNetDiff = absSpread * 2.2
+  if (netDiff < expectedNetDiff) dogCoverScore += (expectedNetDiff - netDiff) * 0.05
+
+  // TOV% avantage underdog
+  if (dog.tovPct < fav.tovPct) dogCoverScore += 0.5
+
+  // eFG% underdog
+  if (dog.eFG > fav.eFG - 3) dogCoverScore += 0.5
+
+  // Prob que l'underdog couvre (0-100)
+  const dogCoverProb = Math.min(72, Math.max(28, Math.round(50 + dogCoverScore * 2)))
+  const favCoverProb = 100 - dogCoverProb
+
+  return {
+    favCoverProb,
+    dogCoverProb,
+    favCovers: favCoverProb > dogCoverProb,
+    coverTeam: favCoverProb > dogCoverProb ? fav : dog,
+    coverProb: Math.max(favCoverProb, dogCoverProb)
+  }
+}
+
+// Modèle Over/Under
+function overUnderModel(home, away, vegasTotal) {
+  const hAdj = home
+  const aAdj = away
+
+  // Pace combiné — plus de pace = plus de points
+  const avgPace = (hAdj.pace + aAdj.pace) / 2
+  const paceScore = (avgPace - 70) * 0.8
+
+  // eFG% combiné — plus d'efficacité = plus de points
+  const avgEFG = (hAdj.eFG + aAdj.eFG) / 2
+  const efgScore = (avgEFG - 52) * 0.6
+
+  // TOV% combiné — plus de turnovers = moins de points
+  const avgTOV = (hAdj.tovPct + aAdj.tovPct) / 2
+  const tovScore = -(avgTOV - 14) * 0.5
+
+  // DRtg combiné — meilleures défenses = under
+  const avgDRtg = (hAdj.dRtg + aAdj.dRtg) / 2
+  const drtgScore = (avgDRtg - 95) * 0.4
+
+  // ORtg combiné — meilleures offenses = over
+  const avgORtg = (hAdj.oRtg + aAdj.oRtg) / 2
+  const ortgScore = (avgORtg - 110) * 0.3
+
+  // FT Rate — plus de lancers = plus de points
+  const avgFTRate = (hAdj.ftRate + aAdj.ftRate) / 2
+  const ftScore = (avgFTRate - 35) * 0.2
+
+  // Score total over
+  const overScore = paceScore + efgScore + tovScore + drtgScore + ortgScore + ftScore
+
+  // Prob over (0-100)
+  const overProb = Math.min(72, Math.max(28, Math.round(50 + overScore)))
+  const underProb = 100 - overProb
+
+  return {
+    overProb,
+    underProb,
+    isOver: overProb > underProb,
+    ouProb: Math.max(overProb, underProb)
+  }
+}
+
+export function predictAdvanced(home, away, homeInj = [], awayInj = [], vegasSpread, vegasTotal) {
   const h = applyInjuries(home, homeInj)
   const a = applyInjuries(away, awayInj)
 
-  // ── PACE ──────────────────────────────────────────────────────────────────
-  // pace = possessions par équipe par 40 min (standard KenPom)
-  const avgPace = (h.pace + a.pace) / 2
+  const hFF = fourFactorsScore(h)
+  const aFF = fourFactorsScore(a)
 
-  // ── FORMULE KENPOM CORRECTE ───────────────────────────────────────────────
-  // Score = (ORtg / 100) × possessions
-  // SANS croiser avec DRtg adverse — ça double l'ajustement
-  // On utilise ORtg de l'équipe directement × pace
-  // Puis on ajuste via NET rating de l'adversaire
+  // Déterminer favori et underdog selon Vegas
+  const fav = vegasSpread !== undefined
+    ? (vegasSpread <= 0 ? h : a)
+    : (h.seed <= a.seed ? h : a)
+  const dog = fav.abbr === h.abbr ? a : h
 
-  // Score offensif de base
-  const hOffBase = (h.oRtg / 100) * avgPace
-  const aOffBase = (a.oRtg / 100) * avgPace
+  // Modèle spread
+  const spreadResult = spreadCoverModel(fav, dog, vegasSpread || -3.5)
 
-  // Ajustement défensif: NET rating adverse / 20
-  // Si adversaire a DRtg 90 (excellent) → réduction de (100-90)/20 = 0.5 pts
-  // Si adversaire a DRtg 110 (mauvais) → augmentation de (100-110)/20 = -0.5 pts  
-  const hDefAdj = (LEAGUE_AVG_DRTG - a.dRtg) / 20
-  const aDefAdj = (LEAGUE_AVG_DRTG - h.dRtg) / 20
+  // Modèle over/under
+  const ouResult = overUnderModel(h, a, vegasTotal || 145)
 
-  let hBase = hOffBase + hDefAdj
-  let aBase = aOffBase + aDefAdj
+  // Probabilité victoire
+  const hNet      = h.oRtg - h.dRtg
+  const aNet      = a.oRtg - a.dRtg
+  const netDiff   = hNet - aNet
+  const sosFactor = ((h.sos || 5) - (a.sos || 5)) * 0.9
+  const l10Factor = ((h.last10W || 5) - (a.last10W || 5)) * 0.7
+  const seedFactor= (a.seed - h.seed) * 1.2
+  const ffFactor  = (hFF - aFF) * 0.35
 
-  // ── FOUR FACTORS (Dean Oliver) ────────────────────────────────────────────
-  const hFF   = fourFactorsScore(h)
-  const aFF   = fourFactorsScore(a)
-  // Impact modéré: 1 point de FF = 0.03 pts de score
-  hBase += (hFF - 22) * 0.03
-  aBase += (aFF - 22) * 0.03
-
-  // ── TURNOVER ADJUSTMENT ───────────────────────────────────────────────────
-  // 1% TOV supplémentaire = ~0.3 pts perdus
-  hBase -= (h.tovPct - 14) * 0.3
-  aBase -= (a.tovPct - 14) * 0.3
-
-  // ── OFFENSIVE REBOUND ─────────────────────────────────────────────────────
-  // 1% ORB supplémentaire = ~0.08 pts
-  hBase += (h.orbPct - 29) * 0.08
-  aBase += (a.orbPct - 29) * 0.08
-
-  // ── TRUE SHOOTING ─────────────────────────────────────────────────────────
-  // 1% TS% supplémentaire = ~0.05 pts
-  hBase += (h.tsPct - 57) * 0.05
-  aBase += (a.tsPct - 57) * 0.05
-
-  // ── TOURNOI = SITE NEUTRE ─────────────────────────────────────────────────
-  hBase *= TOURNAMENT_FACTOR
-  aBase *= TOURNAMENT_FACTOR
-
-  // ── MOMENTUM L10 ──────────────────────────────────────────────────────────
-  hBase += ((h.last10W || 5) - 5) * 0.25
-  aBase += ((a.last10W || 5) - 5) * 0.25
-
-  // ── SOS ───────────────────────────────────────────────────────────────────
-  const sosDiff = ((h.sos || 5) - (a.sos || 5)) * 0.10
-  hBase += sosDiff
-  aBase -= sosDiff
-
-  // ── UPSET FACTOR March Madness ────────────────────────────────────────────
-  // Underdogs performent mieux que prévu en tournoi
-  const seedGap = h.seed - a.seed  // positif si away est favori
-  if (Math.abs(seedGap) > 3) {
-    // Réduire l'écart de 12%
-    const avg = (hBase + aBase) / 2
-    hBase = hBase * 0.88 + avg * 0.12
-    aBase = aBase * 0.88 + avg * 0.12
-  }
-
-  // ── SCORES FINAUX ─────────────────────────────────────────────────────────
-  const hScore = Math.round(Math.max(56, Math.min(98, hBase)))
-  const aScore = Math.round(Math.max(56, Math.min(98, aBase)))
-
-  const actualTotal = hScore + aScore
-  const projTotal   = parseFloat(actualTotal.toFixed(1))
-  const spread      = parseFloat((hScore - aScore).toFixed(1))
-
-  // ── PROBABILITÉ DE VICTOIRE ───────────────────────────────────────────────
-  const hNet       = h.oRtg - h.dRtg
-  const aNet       = a.oRtg - a.dRtg
-  const netDiff    = hNet - aNet
-  const sosFactor  = ((h.sos     || 5) - (a.sos     || 5)) * 0.9
-  const l10Factor  = ((h.last10W || 5) - (a.last10W || 5)) * 0.7
-  const seedFactor = (a.seed - h.seed) * 1.2
-  const ffFactor   = (hFF - aFF) * 0.35
-  const tovFactor  = (a.tovPct - h.tovPct) * 0.5
-  const orbFactor  = (h.orbPct - a.orbPct) * 0.3
-  const tsFactor   = (h.tsPct - a.tsPct) * 0.25
-
-  const rawProb = 50 + netDiff * 1.3 + sosFactor + l10Factor + seedFactor + ffFactor + tovFactor + orbFactor + tsFactor
+  const rawProb = 50 + netDiff * 1.3 + sosFactor + l10Factor + seedFactor + ffFactor
   const winProb = Math.min(95, Math.max(5, Math.round(rawProb)))
 
-  // ── CONFIANCE ─────────────────────────────────────────────────────────────
+  // Confiance
   const netDiffAbs = Math.abs(netDiff)
   const confidence = netDiffAbs > 15 ? 'ÉLEVÉE 🟢' : netDiffAbs > 8 ? 'MOYENNE 🟡' : 'FAIBLE 🔴'
 
   return {
-    hScore, aScore, projTotal, spread,
-    winProb, actualTotal, confidence,
-    isOver: false,
-    absSpread: Math.abs(spread).toFixed(1),
+    // Spread
+    favCovers: spreadResult.favCovers,
+    coverTeam: spreadResult.coverTeam,
+    coverProb: spreadResult.coverProb,
+    favCoverProb: spreadResult.favCoverProb,
+    dogCoverProb: spreadResult.dogCoverProb,
+    fav, dog,
+    // Over/Under
+    isOver: ouResult.isOver,
+    overProb: ouResult.overProb,
+    underProb: ouResult.underProb,
+    ouProb: ouResult.ouProb,
+    // Général
+    winProb,
+    confidence,
     hAdj: h, aAdj: a,
-    hFF: hFF.toFixed(1), aFF: aFF.toFixed(1)
+    hFF: hFF.toFixed(1), aFF: aFF.toFixed(1),
+    // Compatibilité
+    hScore: 0, aScore: 0, projTotal: vegasTotal || 145,
+    spread: vegasSpread || 0, actualTotal: 0,
+    absSpread: Math.abs(vegasSpread || 0).toFixed(1)
   }
 }
