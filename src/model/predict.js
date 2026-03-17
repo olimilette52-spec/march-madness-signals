@@ -35,22 +35,14 @@ function spreadModel(fav, dog, absSpread) {
   const favNet = fav.oRtg - fav.dRtg
   const dogNet = dog.oRtg - dog.dRtg
   const netDiff = favNet - dogNet
-
   const expectedMargin = netDiff * 2.2
-  const spreadValue    = expectedMargin - absSpread
+  const spreadValue = expectedMargin - absSpread
   score += spreadValue * 0.18
 
-  const efgDiff = favFF.efg - dogFF.efg
-  score += efgDiff * 0.12
-
-  const tovDiff = dogFF.tov - favFF.tov
-  score += tovDiff * 0.10
-
-  const orbDiff = favFF.orb - dogFF.orb
-  score += orbDiff * 0.08
-
-  const ftDiff = favFF.ft - dogFF.ft
-  score += ftDiff * 0.06
+  score += (favFF.efg - dogFF.efg) * 0.12
+  score += (dogFF.tov - favFF.tov) * 0.10
+  score += (favFF.orb - dogFF.orb) * 0.08
+  score += (favFF.ft  - dogFF.ft)  * 0.06
 
   if (dog.dRtg < 92) score -= (92 - dog.dRtg) * 0.15
   if (dog.dRtg < 95) score -= (95 - dog.dRtg) * 0.08
@@ -60,15 +52,9 @@ function spreadModel(fav, dog, absSpread) {
   else if (absSpread >= 7)  score -= 0.5
   else                      score += 1.5
 
-  const favMomentum = (fav.last10W || 5) - 5
-  const dogMomentum = (dog.last10W || 5) - 5
-  score += (favMomentum - dogMomentum) * 0.35
-
-  const sosDiff = (fav.sos || 5) - (dog.sos || 5)
-  score -= sosDiff * 0.20
-
-  const tsDiff = fav.tsPct - dog.tsPct
-  score += tsDiff * 0.08
+  score += ((fav.last10W || 5) - (dog.last10W || 5)) * 0.35
+  score -= ((fav.sos || 5) - (dog.sos || 5)) * 0.20
+  score += (fav.tsPct - dog.tsPct) * 0.08
 
   const paceDiff = fav.pace - dog.pace
   if (paceDiff > 4)  score -= 1.0
@@ -76,61 +62,60 @@ function spreadModel(fav, dog, absSpread) {
 
   const favCoverProb = Math.min(75, Math.max(35, Math.round(50 + score * 2.5)))
   const dogCoverProb = 100 - favCoverProb
-  const favCovers    = favCoverProb > 50
 
   return {
-    favCovers,
+    favCovers:    favCoverProb > 50,
     favCoverProb,
     dogCoverProb,
-    coverTeam: favCovers ? fav : dog,
-    coverProb: Math.max(favCoverProb, dogCoverProb),
-    spreadValue: spreadValue.toFixed(1),
-    score: score.toFixed(2)
+    coverTeam:    favCoverProb > 50 ? fav : dog,
+    coverProb:    Math.max(favCoverProb, dogCoverProb),
+    spreadValue:  spreadValue.toFixed(1),
+    score:        score.toFixed(2)
   }
 }
 
 function overUnderModel(h, a, vegasTotal) {
   let score = 0
 
-  // 1. PACE — facteur #1
+  // 1. PACE vs total Vegas
   const avgPace = (h.pace + a.pace) / 2
-  score += (avgPace - 70) * 0.50
+  const paceVsTotal = (avgPace - 68) * (145 / vegasTotal)
+  score += paceVsTotal * 0.6
 
   // 2. eFG% combiné
   const avgEFG = (h.eFG + a.eFG) / 2
-  score += (avgEFG - 53) * 0.40
+  score += (avgEFG - 51) * 0.5
 
-  // 3. DRtg combiné — réduit pour éviter biais under
-  const avgDRtg = (h.dRtg + a.dRtg) / 2
-  score -= (100 - avgDRtg) * 0.15
-
-  // 4. ORtg combiné
-  const avgORtg = (h.oRtg + a.oRtg) / 2
-  score += (avgORtg - 112) * 0.30
-
-  // 5. TOV% combiné
+  // 3. TOV%
   const avgTOV = (h.tovPct + a.tovPct) / 2
-  score -= (avgTOV - 14) * 0.25
+  score -= (avgTOV - 14) * 0.4
 
-  // 6. TS% combiné
+  // 4. TS%
   const avgTS = (h.tsPct + a.tsPct) / 2
-  score += (avgTS - 57) * 0.20
+  score += (avgTS - 55) * 0.3
 
-  // 7. FT Rate combiné
+  // 5. FT Rate
   const avgFT = (h.ftRate + a.ftRate) / 2
-  score += (avgFT - 35) * 0.15
+  score += (avgFT - 34) * 0.2
 
-  // 8. ORB% combiné
+  // 6. ORB%
   const avgORB = (h.orbPct + a.orbPct) / 2
-  score += (avgORB - 29) * 0.12
+  score += (avgORB - 29) * 0.15
 
-  // 9. Vegas total vs attendu
-  const expectedTotal = (h.oRtg + a.oRtg) / 2 * avgPace / 100 * 0.97
-  const vegasVsExpected = expectedTotal - vegasTotal
-  score += vegasVsExpected * 0.08
+  // 7. NET rating combiné
+  const avgNet = ((h.oRtg - h.dRtg) + (a.oRtg - a.dRtg)) / 2
+  if      (avgNet > 15) score += 1.5
+  else if (avgNet > 10) score += 0.8
+  else if (avgNet <  5) score -= 0.8
+  else if (avgNet <  0) score -= 1.5
 
-  // Conversion — multiplicateur réduit à 1.8 pour équilibre over/under
-  const overProb  = Math.min(75, Math.max(35, Math.round(50 + score * 1.8)))
+  // 8. Total Vegas bas = over, haut = under
+  if      (vegasTotal < 135) score += 1.5
+  else if (vegasTotal < 140) score += 0.8
+  else if (vegasTotal > 165) score -= 1.5
+  else if (vegasTotal > 158) score -= 0.8
+
+  const overProb  = Math.min(74, Math.max(36, Math.round(50 + score * 2.2)))
   const underProb = 100 - overProb
 
   return {
@@ -140,7 +125,6 @@ function overUnderModel(h, a, vegasTotal) {
     ouProb:   Math.max(overProb, underProb),
     avgPace:  avgPace.toFixed(1),
     avgEFG:   avgEFG.toFixed(1),
-    avgDRtg:  avgDRtg.toFixed(1),
     score:    score.toFixed(2)
   }
 }
@@ -155,7 +139,7 @@ export function predictAdvanced(home, away, homeInj = [], awayInj = [], vegasSpr
   const fav = (vegasSpread !== undefined && vegasSpread !== null)
     ? (vegasSpread <= 0 ? h : a)
     : (h.seed <= a.seed ? h : a)
-  const dog = fav.abbr === h.abbr ? a : h
+  const dog       = fav.abbr === h.abbr ? a : h
   const absSpread = Math.abs(vegasSpread || 3.5)
 
   const spreadResult = spreadModel(fav, dog, absSpread)
