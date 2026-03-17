@@ -21,71 +21,89 @@ function fourFactorsScore(team) {
   return team.eFG * 0.40 + (20 - team.tovPct) * 0.25 + team.orbPct * 0.20 + team.ftRate * 0.15
 }
 
+// Calibration basée sur historique NCAA Tournament
+// Score moyen NCAA Tournament = ~72 pts par équipe
+// Total moyen = ~144 pts
+// Pace moyen = ~70 possessions par équipe
+const LEAGUE_AVG_ORTG = 100  // baseline NCAA
+const LEAGUE_AVG_DRTG = 100
+const TOURNAMENT_FACTOR = 0.98  // légère réduction en tournoi (site neutre, meilleurs adversaires)
+
 export function predictAdvanced(home, away, homeInj = [], awayInj = []) {
   const h = applyInjuries(home, homeInj)
   const a = applyInjuries(away, awayInj)
 
   // ── PACE ──────────────────────────────────────────────────────────────────
-  // pace dans nos données = possessions des DEUX équipes combinées par 40 min
-  // Possessions par équipe = pace / 2
+  // pace = possessions par équipe par 40 min (standard KenPom)
   const avgPace = (h.pace + a.pace) / 2
-  const teamPoss = avgPace / 2  // ~34-38 possessions par équipe
 
-  // ── SCORE KenPom ──────────────────────────────────────────────────────────
-  // Formule: Points = (ORtg_adj / 100) × possessions_par_équipe
-  // ORtg adj = ORtg de l'attaque × (DRtg adverse / 100)
-  // Ex: Duke ORtg 121.4 × (Siena DRtg 107.8 / 100) = 130.9 → 130.9/100 × 37 = 48.4 pts ← trop bas
-  
-  // En réalité le pace NCAA = possessions PAR équipe (pas combiné)
-  // Duke pace 72 = 72 possessions par équipe → 72 × (121.4/100) × (107.8/100) = ~94 pts ← réaliste !
-  
-  const hAdjO = h.oRtg * (a.dRtg / 100)  // efficacité offensive ajustée
-  const aAdjO = a.oRtg * (h.dRtg / 100)
+  // ── FORMULE KENPOM CORRECTE ───────────────────────────────────────────────
+  // Score = (ORtg / 100) × possessions
+  // SANS croiser avec DRtg adverse — ça double l'ajustement
+  // On utilise ORtg de l'équipe directement × pace
+  // Puis on ajuste via NET rating de l'adversaire
 
-  // Score = AdjO/100 × pace (possessions par équipe)
-  let hBase = (hAdjO / 100) * avgPace
-  let aBase = (aAdjO / 100) * avgPace
+  // Score offensif de base
+  const hOffBase = (h.oRtg / 100) * avgPace
+  const aOffBase = (a.oRtg / 100) * avgPace
+
+  // Ajustement défensif: NET rating adverse / 20
+  // Si adversaire a DRtg 90 (excellent) → réduction de (100-90)/20 = 0.5 pts
+  // Si adversaire a DRtg 110 (mauvais) → augmentation de (100-110)/20 = -0.5 pts  
+  const hDefAdj = (LEAGUE_AVG_DRTG - a.dRtg) / 20
+  const aDefAdj = (LEAGUE_AVG_DRTG - h.dRtg) / 20
+
+  let hBase = hOffBase + hDefAdj
+  let aBase = aOffBase + aDefAdj
 
   // ── FOUR FACTORS (Dean Oliver) ────────────────────────────────────────────
-  const hFF  = fourFactorsScore(h)
-  const aFF  = fourFactorsScore(a)
-  const ffAdj = (hFF - aFF) * 0.06
-  hBase += ffAdj
-  aBase -= ffAdj
+  const hFF   = fourFactorsScore(h)
+  const aFF   = fourFactorsScore(a)
+  // Impact modéré: 1 point de FF = 0.03 pts de score
+  hBase += (hFF - 22) * 0.03
+  aBase += (aFF - 22) * 0.03
 
-  // ── TRUE SHOOTING % ───────────────────────────────────────────────────────
-  hBase += (h.tsPct - 57) * 0.08
-  aBase += (a.tsPct - 57) * 0.08
-
-  // ── TURNOVER IMPACT ───────────────────────────────────────────────────────
-  // Chaque 1% de TOV supplémentaire = ~0.4 pts perdus
-  hBase -= (h.tovPct - 14) * 0.4
-  aBase -= (a.tovPct - 14) * 0.4
+  // ── TURNOVER ADJUSTMENT ───────────────────────────────────────────────────
+  // 1% TOV supplémentaire = ~0.3 pts perdus
+  hBase -= (h.tovPct - 14) * 0.3
+  aBase -= (a.tovPct - 14) * 0.3
 
   // ── OFFENSIVE REBOUND ─────────────────────────────────────────────────────
-  hBase += (h.orbPct - 29) * 0.12
-  aBase += (a.orbPct - 29) * 0.12
+  // 1% ORB supplémentaire = ~0.08 pts
+  hBase += (h.orbPct - 29) * 0.08
+  aBase += (a.orbPct - 29) * 0.08
 
-  // ── FREE THROW RATE ───────────────────────────────────────────────────────
-  hBase += (h.ftRate - 35) * 0.05
-  aBase += (a.ftRate - 35) * 0.05
+  // ── TRUE SHOOTING ─────────────────────────────────────────────────────────
+  // 1% TS% supplémentaire = ~0.05 pts
+  hBase += (h.tsPct - 57) * 0.05
+  aBase += (a.tsPct - 57) * 0.05
+
+  // ── TOURNOI = SITE NEUTRE ─────────────────────────────────────────────────
+  hBase *= TOURNAMENT_FACTOR
+  aBase *= TOURNAMENT_FACTOR
 
   // ── MOMENTUM L10 ──────────────────────────────────────────────────────────
-  hBase += ((h.last10W || 5) - 5) * 0.35
-  aBase += ((a.last10W || 5) - 5) * 0.35
+  hBase += ((h.last10W || 5) - 5) * 0.25
+  aBase += ((a.last10W || 5) - 5) * 0.25
 
   // ── SOS ───────────────────────────────────────────────────────────────────
-  const sosDiff = ((h.sos || 5) - (a.sos || 5)) * 0.18
+  const sosDiff = ((h.sos || 5) - (a.sos || 5)) * 0.10
   hBase += sosDiff
   aBase -= sosDiff
 
-  // ── SEED AVANTAGE ─────────────────────────────────────────────────────────
-  hBase += (a.seed - h.seed) * 0.22
+  // ── UPSET FACTOR March Madness ────────────────────────────────────────────
+  // Underdogs performent mieux que prévu en tournoi
+  const seedGap = h.seed - a.seed  // positif si away est favori
+  if (Math.abs(seedGap) > 3) {
+    // Réduire l'écart de 12%
+    const avg = (hBase + aBase) / 2
+    hBase = hBase * 0.88 + avg * 0.12
+    aBase = aBase * 0.88 + avg * 0.12
+  }
 
   // ── SCORES FINAUX ─────────────────────────────────────────────────────────
-  // NCAA college basketball: scores réalistes entre 60-100 pts
-  const hScore = Math.round(Math.max(58, Math.min(102, hBase)))
-  const aScore = Math.round(Math.max(58, Math.min(102, aBase)))
+  const hScore = Math.round(Math.max(56, Math.min(98, hBase)))
+  const aScore = Math.round(Math.max(56, Math.min(98, aBase)))
 
   const actualTotal = hScore + aScore
   const projTotal   = parseFloat(actualTotal.toFixed(1))
@@ -95,16 +113,16 @@ export function predictAdvanced(home, away, homeInj = [], awayInj = []) {
   const hNet       = h.oRtg - h.dRtg
   const aNet       = a.oRtg - a.dRtg
   const netDiff    = hNet - aNet
-  const sosFactor  = ((h.sos     || 5) - (a.sos     || 5)) * 1.2
-  const l10Factor  = ((h.last10W || 5) - (a.last10W || 5)) * 1.0
-  const seedFactor = (a.seed - h.seed) * 1.8
-  const ffFactor   = (hFF - aFF) * 0.5
-  const tovFactor  = (a.tovPct - h.tovPct) * 0.6
-  const orbFactor  = (h.orbPct - a.orbPct) * 0.4
-  const tsFactor   = (h.tsPct - a.tsPct) * 0.3
+  const sosFactor  = ((h.sos     || 5) - (a.sos     || 5)) * 0.9
+  const l10Factor  = ((h.last10W || 5) - (a.last10W || 5)) * 0.7
+  const seedFactor = (a.seed - h.seed) * 1.2
+  const ffFactor   = (hFF - aFF) * 0.35
+  const tovFactor  = (a.tovPct - h.tovPct) * 0.5
+  const orbFactor  = (h.orbPct - a.orbPct) * 0.3
+  const tsFactor   = (h.tsPct - a.tsPct) * 0.25
 
-  const rawProb = 50 + netDiff * 1.6 + sosFactor + l10Factor + seedFactor + ffFactor + tovFactor + orbFactor + tsFactor
-  const winProb = Math.min(97, Math.max(3, Math.round(rawProb)))
+  const rawProb = 50 + netDiff * 1.3 + sosFactor + l10Factor + seedFactor + ffFactor + tovFactor + orbFactor + tsFactor
+  const winProb = Math.min(95, Math.max(5, Math.round(rawProb)))
 
   // ── CONFIANCE ─────────────────────────────────────────────────────────────
   const netDiffAbs = Math.abs(netDiff)
