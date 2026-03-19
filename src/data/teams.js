@@ -37,7 +37,7 @@ export const MATCHUPS = [
   { id: 22, region: 'South',   home: 'ILL',   away: 'PENN',  time: 'Ven 20 Mar 21:25', vegasSpread: -24.5, vegasTotal: 150.5 },
   { id: 23, region: 'South',   home: 'SMC',   away: 'TXAM',  time: 'Ven 20 Mar 19:25', vegasSpread: -3.5,  vegasTotal: 147.5 },
   { id: 24, region: 'South',   home: 'HOU',   away: 'IDA',   time: 'Ven 20 Mar 13:50', vegasSpread: -21.5, vegasTotal: 133.5 },
-  { id: 25, region: 'Midwest', home: 'MICH',  away: 'HOW',   time: 'Jeu 19 Mar 19:10', vegasSpread: -18.5, vegasTotal: 142.5 },
+  { id: 25, region: 'Midwest', home: 'MICH',  away: 'HOW',   time: 'Jeu 19 Mar 19:10', vegasSpread: -31.5, vegasTotal: 151.5 },
   { id: 26, region: 'Midwest', home: 'GEO',   away: 'SLU',   time: 'Jeu 19 Mar 21:45', vegasSpread: -1.5,  vegasTotal: 171.5 },
   { id: 27, region: 'Midwest', home: 'TTU',   away: 'AKR',   time: 'Ven 20 Mar 12:40', vegasSpread: -7.5,  vegasTotal: 156.5 },
   { id: 28, region: 'Midwest', home: 'ALA',   away: 'HOF',   time: 'Ven 20 Mar 15:15', vegasSpread: -11.5, vegasTotal: 159.5 },
